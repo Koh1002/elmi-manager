@@ -1,0 +1,32 @@
+# elmi-manager ローカル開発環境
+# 起動: docker compose up
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=local
+      - AWS_REGION=ap-northeast-1
+      # TODO(AWS): 実AWS接続時に以下を設定
+      # - COGNITO_TARGET_POOL_ID=ap-northeast-1_XXXXXXXXX
+      # - BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+      # - SES_SENDER_EMAIL=noreply@yourdomain.com
+    volumes:
+      - ./backend:/app/backend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    environment:
+      - VITE_API_URL=http://localhost:8000
