@@ -28,3 +28,14 @@ Thumbs.db
 
 # Logs
 *.log
+
+# AWS CDK
+infra/cdk.out/
+infra/node_modules/
+
+# Docker
+docker/tmp/
+
+# LocalStack
+.localstack/
+volume/

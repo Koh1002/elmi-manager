@@ -201,36 +201,48 @@ MLflowの「Experiment → Run → Metrics」に相当する構造を持つ。
 
 ### 3.1 アーキテクチャ
 
+> 詳細は [deployment-architecture.md](./deployment-architecture.md) を参照
+
 ```
 [ブラウザ]
     │
-    ▼
-[elmi-manager フロントエンド]  ← React (Vite)
+    ├──→ [CloudFront + S3]   React SPA（フロントエンド）
     │
-    ▼
-[elmi-manager API]             ← Node.js (Express) or Python (FastAPI)
-    │
-    ├──→ [Amazon Cognito]       ユーザー管理API
-    ├──→ [CloudWatch Logs]      ログ取得
-    ├──→ [DynamoDB]             テストケース・実行結果保存
-    ├──→ [Amazon Bedrock]       改善提案AI生成
-    ├──→ [Amazon SES]           メール送信
-    └──→ [エルみえる API]       テスト実行時のリクエスト投入
+    └──→ [AWS App Runner]    Python FastAPI（バックエンドAPI）
+              │
+              ├──→ [Amazon Cognito]       ユーザー管理API（エルみえるUser Pool操作）
+              ├──→ [Amazon Cognito]       elmi-manager認証（専用User Pool）
+              ├──→ [Amazon Bedrock]       AI改善提案生成（Claude）
+              ├──→ [Amazon DynamoDB]      ログ・テストケース・実行結果保存
+              ├──→ [Amazon S3]            設定ファイルのバージョン管理
+              ├──→ [Amazon SES]           日次改善レポートメール送信
+              ├──→ [CloudWatch Logs]      エルみえるの実行ログ取得
+              └──→ [エルみえる API]       テスト実行時のリクエスト投入
+
+[CloudWatch Logs] ──→ [Subscription Filter] ──→ [Lambda] ──→ [DynamoDB]
+                       ログ収集パイプライン（ニアリアルタイム）
+
+[EventBridge] ──→ [Lambda] ──→ [App Runner] ──→ [SES]
+               日次バッチ（09:00 JST）
 ```
 
 ### 3.2 認証・認可
-- elmi-manager自体のログインにもCognitoを利用（管理者用ユーザープール、またはグループで分離）
+- **elmi-manager専用のCognito User Pool**を作成（エルみえるのUser Poolとは分離）
 - 管理者ロールのみアクセス可能
+- セルフ登録は無効（管理者が手動作成）
+- JWT（Access Token）による認証
 
 ### 3.3 デプロイ
-- フロントエンド: S3 + CloudFront
-- バックエンド: Lambda + API Gateway（or ECS Fargate）
-- インフラ定義: AWS CDK or Terraform
+- **フロントエンド**: S3 + CloudFront
+- **バックエンド**: AWS App Runner（FastAPI + uvicorn、0.25 vCPU / 0.5 GB、auto-pause有効）
+- **インフラ定義**: AWS CDK (TypeScript)、6スタック構成
+- **CI/CD**: GitHub Actions（OIDC認証、キーレス）
+- **推定月額コスト**: $8-15/月
 
 ### 3.4 データ保持
-- ログデータ: 90日間保持（S3にアーカイブ後は1年間）
-- テスト実行履歴: 無期限
-- 設定ファイルバージョン: 無期限
+- **ログデータ**: DynamoDB TTLで90日間保持
+- **テスト実行履歴**: 無期限（DynamoDB）
+- **設定ファイルバージョン**: 無期限（S3 + DynamoDBメタデータ、1年後Glacier移行）
 
 ---
 

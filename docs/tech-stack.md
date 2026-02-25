@@ -24,18 +24,36 @@
 | FastAPI | 0.115.x | APIフレームワーク |
 | Pydantic | 2.x | データバリデーション |
 | Boto3 | latest | AWS SDK |
-| SQLAlchemy | 2.x | ORM（ローカルDB用） |
-| SQLite | - | ローカルデータストア（テストケース・ログ永続化） |
+| python-jose | latest | JWT検証（Cognito認証） |
+| uvicorn | latest | ASGIサーバー |
 
-### AWS連携（Phase 2以降で段階的に接続）
-| サービス | 用途 |
-|----------|------|
-| Amazon Cognito | ユーザー管理API |
-| CloudWatch Logs | ログ取得 |
-| Amazon Bedrock | AI改善提案生成 |
-| Amazon SES | 日次メール送信 |
-| Amazon EventBridge | 日次スケジュール |
-| Amazon S3 | 設定ファイル保存 |
+### インフラ（AWS CDK）
+| 技術 | バージョン | 用途 |
+|------|-----------|------|
+| AWS CDK | 2.x | IaC（TypeScript） |
+| Docker | - | バックエンドコンテナビルド |
+
+### AWS サービス構成
+| サービス | 用途 | 備考 |
+|----------|------|------|
+| AWS App Runner | バックエンドAPI実行基盤 | 0.25 vCPU / 0.5 GB, auto-pause |
+| Amazon S3 + CloudFront | フロントエンド配信 | React SPA |
+| Amazon Cognito | 認証（elmi-manager用 + エルみえる管理対象） | 専用User Pool分離 |
+| Amazon DynamoDB | データストア | オンデマンド課金、5テーブル |
+| Amazon S3 | 設定ファイル保存 | バージョン管理 |
+| Amazon Bedrock | AI改善提案生成 | Claude Sonnet |
+| Amazon SES | 日次メール送信 | |
+| Amazon EventBridge | 日次スケジュール | cron 09:00 JST |
+| Amazon ECR | Dockerイメージ保存 | App Runner自動デプロイ |
+| CloudWatch Logs | エルみえるログ取得 | Subscription Filter |
+
+### テスト・開発ツール
+| 技術 | 用途 |
+|------|------|
+| pytest + moto | バックエンドテスト（AWSサービスモック） |
+| Vitest + MSW | フロントエンドテスト（APIモック） |
+| Docker Compose | ローカル開発環境 |
+| LocalStack (オプション) | ローカルAWSエミュレーション |
 
 ---
 
@@ -115,13 +133,50 @@ elmi-manager/
 │   ├── requirements.txt
 │   └── pyproject.toml
 │
+├── infra/                         # AWS CDK (TypeScript)
+│   ├── bin/
+│   │   └── app.ts                 # CDKアプリ エントリーポイント
+│   ├── lib/
+│   │   ├── shared-stack.ts        # IAMロール、共通リソース
+│   │   ├── data-stack.ts          # DynamoDB + S3
+│   │   ├── auth-stack.ts          # Cognito User Pool
+│   │   ├── backend-stack.ts       # App Runner + ECR
+│   │   ├── frontend-stack.ts      # S3 + CloudFront
+│   │   ├── ingestion-stack.ts     # ログ収集Lambda
+│   │   └── scheduler-stack.ts     # EventBridge + 日次Lambda
+│   ├── cdk.json
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── docker/
+│   └── Dockerfile                 # バックエンドコンテナイメージ
+│
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                 # PR: テスト + cdk diff
+│       └── deploy.yml             # main: テスト + デプロイ
+│
+├── docker-compose.yml             # ローカル開発環境
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## 開発環境セットアップ（将来用メモ）
+## 開発環境セットアップ
+
+### ローカル開発（Docker Compose推奨）
+
+```bash
+# 一発起動（フロントエンド + バックエンド + LocalStack）
+docker compose up
+
+# フロントエンド: http://localhost:5173
+# バックエンド:   http://localhost:8000
+# API仕様確認:    http://localhost:8000/docs  (Swagger UI)
+```
+
+### 個別起動
 
 ```bash
 # フロントエンド
@@ -135,7 +190,25 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload  # http://localhost:8000
+```
 
-# API仕様確認
-# http://localhost:8000/docs  (Swagger UI)
+### テスト実行
+
+```bash
+# バックエンド（pytest + moto）
+cd backend
+pytest
+
+# フロントエンド（vitest）
+cd frontend
+npm test
+```
+
+### CDK デプロイ
+
+```bash
+cd infra
+npm install
+npx cdk diff          # 変更プレビュー
+npx cdk deploy --all  # 全スタックデプロイ
 ```
