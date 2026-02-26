@@ -38,13 +38,16 @@ export REPORT_RECIPIENT_EMAIL="admin@yourdomain.com"    # ← 要変更
 # === Bedrock ===
 export BEDROCK_MODEL_ID="anthropic.claude-3-sonnet-20240229-v1:0"
 
-# === 自動生成される名前（変更不要） ===
-export ECR_REPO="${PROJECT_NAME}"
-export APP_RUNNER_SERVICE="${PROJECT_NAME}-${ENVIRONMENT}"
-export DYNAMODB_PREFIX="${PROJECT_NAME}"
-export S3_BUCKET="${PROJECT_NAME}-config-${AWS_ACCOUNT_ID}"
-export COGNITO_MANAGER_POOL="${PROJECT_NAME}-auth"
-export DAILY_REPORT_LAMBDA="${PROJECT_NAME}-daily-report"
+# === 作成者識別 ===
+export OWNER="shinoda"
+
+# === 自動生成される名前（OWNER が含まれる） ===
+export ECR_REPO="${PROJECT_NAME}-${OWNER}"
+export APP_RUNNER_SERVICE="${PROJECT_NAME}-${OWNER}-${ENVIRONMENT}"
+export DYNAMODB_PREFIX="${PROJECT_NAME}-${OWNER}"
+export S3_BUCKET="${PROJECT_NAME}-${OWNER}-config-${AWS_ACCOUNT_ID}"
+export COGNITO_MANAGER_POOL="${PROJECT_NAME}-${OWNER}-auth"
+export DAILY_REPORT_LAMBDA="${PROJECT_NAME}-${OWNER}-daily-report"
 ```
 
 ### 0-3. 変数の確認
@@ -53,8 +56,18 @@ export DAILY_REPORT_LAMBDA="${PROJECT_NAME}-daily-report"
 echo "=== 設定確認 ==="
 echo "AWS Account: ${AWS_ACCOUNT_ID}"
 echo "Region:      ${AWS_REGION}"
+echo "Owner:       ${OWNER}"
 echo "Target Pool: ${ELMI_TARGET_POOL_ID}"
 echo "Sender:      ${SES_SENDER_EMAIL}"
+echo ""
+echo "=== リソース名 ==="
+echo "IAM Role:    ${PROJECT_NAME}-${OWNER}-instance-role"
+echo "DynamoDB:    ${DYNAMODB_PREFIX}-*"
+echo "S3 Bucket:   ${S3_BUCKET}"
+echo "ECR Repo:    ${ECR_REPO}"
+echo "App Runner:  ${APP_RUNNER_SERVICE}"
+echo "Lambda:      ${DAILY_REPORT_LAMBDA}"
+echo "Cognito:     ${COGNITO_MANAGER_POOL}"
 ```
 
 ---
@@ -84,9 +97,9 @@ TRUST
 
 # ロール作成
 aws iam create-role \
-  --role-name ${PROJECT_NAME}-instance-role \
+  --role-name ${PROJECT_NAME}-${OWNER}-instance-role \
   --assume-role-policy-document file:///tmp/apprunner-trust.json \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 # アクセスポリシー
 cat > /tmp/apprunner-policy.json << POLICY
@@ -161,8 +174,8 @@ cat > /tmp/apprunner-policy.json << POLICY
 POLICY
 
 aws iam put-role-policy \
-  --role-name ${PROJECT_NAME}-instance-role \
-  --policy-name ${PROJECT_NAME}-access \
+  --role-name ${PROJECT_NAME}-${OWNER}-instance-role \
+  --policy-name ${PROJECT_NAME}-${OWNER}-access \
   --policy-document file:///tmp/apprunner-policy.json
 ```
 
@@ -185,11 +198,11 @@ cat > /tmp/apprunner-ecr-trust.json << 'TRUST'
 TRUST
 
 aws iam create-role \
-  --role-name ${PROJECT_NAME}-ecr-access-role \
+  --role-name ${PROJECT_NAME}-${OWNER}-ecr-access-role \
   --assume-role-policy-document file:///tmp/apprunner-ecr-trust.json
 
 aws iam attach-role-policy \
-  --role-name ${PROJECT_NAME}-ecr-access-role \
+  --role-name ${PROJECT_NAME}-${OWNER}-ecr-access-role \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
 ```
 
@@ -236,7 +249,7 @@ aws dynamodb create-table \
       }
     ]' \
   --billing-mode PAY_PER_REQUEST \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 echo "Waiting for usage-logs table..."
 aws dynamodb wait table-exists --table-name ${DYNAMODB_PREFIX}-usage-logs
@@ -270,7 +283,7 @@ aws dynamodb create-table \
       }
     ]' \
   --billing-mode PAY_PER_REQUEST \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 aws dynamodb wait table-exists --table-name ${DYNAMODB_PREFIX}-error-analysis
 ```
@@ -286,7 +299,7 @@ aws dynamodb create-table \
   --key-schema \
     AttributeName=test_id,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 aws dynamodb wait table-exists --table-name ${DYNAMODB_PREFIX}-test-cases
 
@@ -312,7 +325,7 @@ aws dynamodb create-table \
       }
     ]' \
   --billing-mode PAY_PER_REQUEST \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 aws dynamodb wait table-exists --table-name ${DYNAMODB_PREFIX}-test-runs
 ```
@@ -327,7 +340,7 @@ aws dynamodb create-table \
   --key-schema \
     AttributeName=setting_key,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 aws dynamodb wait table-exists --table-name ${DYNAMODB_PREFIX}-settings
 
@@ -376,7 +389,7 @@ POOL_RESULT=$(aws cognito-idp create-user-pool \
     {"Name":"email","Required":true,"Mutable":true}
   ]' \
   --mfa-configuration OFF \
-  --user-pool-tags Project=${PROJECT_NAME} \
+  --user-pool-tags Project=${PROJECT_NAME},Owner=${OWNER} \
   --query 'UserPool.Id' \
   --output text)
 
@@ -386,7 +399,7 @@ echo "Manager User Pool ID: ${COGNITO_MANAGER_POOL_ID}"
 # App Client 作成（SRP 認証フロー）
 CLIENT_RESULT=$(aws cognito-idp create-user-pool-client \
   --user-pool-id ${COGNITO_MANAGER_POOL_ID} \
-  --client-name ${PROJECT_NAME}-web \
+  --client-name ${PROJECT_NAME}-${OWNER}-web \
   --explicit-auth-flows ALLOW_USER_SRP_AUTH ALLOW_REFRESH_TOKEN_AUTH \
   --prevent-user-existence-errors ENABLED \
   --access-token-validity 1 \
@@ -442,7 +455,7 @@ aws s3api put-public-access-block \
 # タグ付け
 aws s3api put-bucket-tagging \
   --bucket ${S3_BUCKET} \
-  --tagging "TagSet=[{Key=Project,Value=${PROJECT_NAME}}]"
+  --tagging "TagSet=[{Key=Project,Value=${PROJECT_NAME}},{Key=Owner,Value=${OWNER}}]"
 
 echo "S3 Bucket: ${S3_BUCKET}"
 ```
@@ -526,7 +539,7 @@ aws ecr create-repository \
   --repository-name ${ECR_REPO} \
   --region ${AWS_REGION} \
   --image-scanning-configuration scanOnPush=true \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 export ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
 echo "ECR URI: ${ECR_URI}"
@@ -561,8 +574,8 @@ echo "Image pushed: ${ECR_URI}:latest"
 ### 8-1. サービス作成
 
 ```bash
-INSTANCE_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${PROJECT_NAME}-instance-role"
-ECR_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${PROJECT_NAME}-ecr-access-role"
+INSTANCE_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${PROJECT_NAME}-${OWNER}-instance-role"
+ECR_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${PROJECT_NAME}-${OWNER}-ecr-access-role"
 
 aws apprunner create-service \
   --service-name ${APP_RUNNER_SERVICE} \
@@ -605,7 +618,7 @@ aws apprunner create-service \
     "HealthyThreshold": 1,
     "UnhealthyThreshold": 5
   }' \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 echo "App Runner サービス作成中... (数分かかります)"
 ```
@@ -718,17 +731,17 @@ aws lambda create-function \
 
 ```bash
 aws events put-rule \
-  --name ${PROJECT_NAME}-daily-report-schedule \
+  --name ${PROJECT_NAME}-${OWNER}-daily-report-schedule \
   --schedule-expression "cron(0 0 * * ? *)" \
   --state ENABLED \
   --description "elmi-manager daily improvement report (JST 09:00)" \
-  --tags Key=Project,Value=${PROJECT_NAME}
+  --tags Key=Project,Value=${PROJECT_NAME} Key=Owner,Value=${OWNER}
 
 # Lambda を EventBridge のターゲットに設定
 LAMBDA_ARN="arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:${DAILY_REPORT_LAMBDA}"
 
 aws events put-targets \
-  --rule ${PROJECT_NAME}-daily-report-schedule \
+  --rule ${PROJECT_NAME}-${OWNER}-daily-report-schedule \
   --targets "Id=daily-report,Arn=${LAMBDA_ARN}"
 
 # EventBridge が Lambda を呼べるように権限付与
@@ -737,7 +750,7 @@ aws lambda add-permission \
   --statement-id eventbridge-daily-report \
   --action lambda:InvokeFunction \
   --principal events.amazonaws.com \
-  --source-arn "arn:aws:events:${AWS_REGION}:${AWS_ACCOUNT_ID}:rule/${PROJECT_NAME}-daily-report-schedule"
+  --source-arn "arn:aws:events:${AWS_REGION}:${AWS_ACCOUNT_ID}:rule/${PROJECT_NAME}-${OWNER}-daily-report-schedule"
 
 echo "Daily report scheduled: JST 09:00 (UTC 00:00)"
 ```
@@ -795,7 +808,7 @@ aws lambda get-function \
 echo ""
 echo "=== 8. EventBridge Rule ==="
 aws events describe-rule \
-  --name ${PROJECT_NAME}-daily-report-schedule \
+  --name ${PROJECT_NAME}-${OWNER}-daily-report-schedule \
   --query "{State:State,Schedule:ScheduleExpression}" \
   --output table 2>/dev/null || echo "NOT CREATED"
 ```
@@ -873,8 +886,8 @@ echo "実行する場合はコメントアウトを外してください"
 # aws apprunner delete-service --service-arn ${SERVICE_ARN}
 
 # --- Lambda & EventBridge ---
-# aws events remove-targets --rule ${PROJECT_NAME}-daily-report-schedule --ids daily-report
-# aws events delete-rule --name ${PROJECT_NAME}-daily-report-schedule
+# aws events remove-targets --rule ${PROJECT_NAME}-${OWNER}-daily-report-schedule --ids daily-report
+# aws events delete-rule --name ${PROJECT_NAME}-${OWNER}-daily-report-schedule
 # aws lambda delete-function --function-name ${DAILY_REPORT_LAMBDA}
 
 # --- DynamoDB ---
@@ -892,10 +905,10 @@ echo "実行する場合はコメントアウトを外してください"
 # aws ecr delete-repository --repository-name ${ECR_REPO} --force
 
 # --- IAM ---
-# aws iam delete-role-policy --role-name ${PROJECT_NAME}-instance-role --policy-name ${PROJECT_NAME}-access
-# aws iam delete-role --role-name ${PROJECT_NAME}-instance-role
-# aws iam detach-role-policy --role-name ${PROJECT_NAME}-ecr-access-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
-# aws iam delete-role --role-name ${PROJECT_NAME}-ecr-access-role
+# aws iam delete-role-policy --role-name ${PROJECT_NAME}-${OWNER}-instance-role --policy-name ${PROJECT_NAME}-${OWNER}-access
+# aws iam delete-role --role-name ${PROJECT_NAME}-${OWNER}-instance-role
+# aws iam detach-role-policy --role-name ${PROJECT_NAME}-${OWNER}-ecr-access-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+# aws iam delete-role --role-name ${PROJECT_NAME}-${OWNER}-ecr-access-role
 # aws iam detach-role-policy --role-name ${DAILY_REPORT_LAMBDA}-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 # aws iam delete-role --role-name ${DAILY_REPORT_LAMBDA}-role
 ```

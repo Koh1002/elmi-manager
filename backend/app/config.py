@@ -11,11 +11,11 @@ class Settings(BaseSettings):
 
     # TODO(AWS): App Runner デプロイ後に実値を環境変数で設定
     # DynamoDB
-    DYNAMODB_TABLE_PREFIX: str = "elmi-manager"
+    DYNAMODB_TABLE_PREFIX: str = "elmi-manager-shinoda"
     DYNAMODB_ENDPOINT: str | None = None  # LocalStack用: http://localhost:4566
 
     # S3
-    S3_CONFIG_BUCKET: str = "elmi-manager-config"
+    S3_CONFIG_BUCKET: str = "elmi-manager-shinoda-config"
     S3_ENDPOINT: str | None = None  # LocalStack用
 
     # Cognito（管理対象のエルみえるUser Pool）
